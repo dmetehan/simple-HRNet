@@ -13,9 +13,18 @@ from SimpleHRNet import SimpleHRNet
 from misc.visualization import draw_points, draw_skeleton, draw_points_and_skeleton, joints_dict, check_video_rotation
 from misc.utils import find_person_id_associations
 
+
+def crop_frame(frame, line):
+    crops = []
+    for i in range(1, len(line), 5):
+        pid, x1, y1, x2, y2 = line[i:i+5]
+        crops.append((frame[y1:y2, x1:x2], (pid, x1, y1)))
+    return crops
+
+
 def main(camera_id, filename, hrnet_m, hrnet_c, hrnet_j, hrnet_weights, hrnet_joints_set, image_resolution,
          single_person, use_tiny_yolo, disable_tracking, max_batch_size, disable_vidgear, save_video, video_format,
-         video_framerate, device):
+         video_framerate, device, detections_path):
     if device is not None:
         device = torch.device(device)
     else:
@@ -25,14 +34,12 @@ def main(camera_id, filename, hrnet_m, hrnet_c, hrnet_j, hrnet_weights, hrnet_jo
         else:
             device = torch.device('cpu')
 
-    # print(device)
-
     image_resolution = ast.literal_eval(image_resolution)
     has_display = 'DISPLAY' in os.environ.keys() or sys.platform == 'win32'
     video_writer = None
 
     if filename is not None:
-        rotation_code = check_video_rotation(filename)
+        rotation_code = None  # check_video_rotation(filename)
         video = cv2.VideoCapture(filename)
         assert video.isOpened()
     else:
@@ -73,6 +80,11 @@ def main(camera_id, filename, hrnet_m, hrnet_c, hrnet_j, hrnet_weights, hrnet_jo
         prev_person_ids = None
         next_person_id = 0
 
+    detections_file = open(detections_path, 'r')
+    detections_file.readline()  # header
+    line = list(map(int, detections_file.readline().strip().split(',')))
+
+    frame_no = 0
     while True:
         t = time.time()
 
@@ -87,36 +99,41 @@ def main(camera_id, filename, hrnet_m, hrnet_c, hrnet_j, hrnet_weights, hrnet_jo
             if frame is None:
                 break
 
-        pts = model.predict(frame)
+        if frame_no == line[0]:
+            crops = crop_frame(frame, line)
+            line = list(map(int, detections_file.readline().strip().split(',')))
+            for crop, (pid, x1, y1) in crops:
 
-        if not disable_tracking:
-            boxes, pts = pts
+                pts = model.predict(crop)
 
-        if not disable_tracking:
-            if len(pts) > 0:
-                if prev_pts is None and prev_person_ids is None:
-                    person_ids = np.arange(next_person_id, len(pts) + next_person_id, dtype=np.int32)
-                    next_person_id = len(pts) + 1
+                if not disable_tracking:
+                    boxes, pts = pts
+
+                if not disable_tracking:
+                    if len(pts) > 0:
+                        if prev_pts is None and prev_person_ids is None:
+                            person_ids = np.arange(next_person_id, len(pts) + next_person_id, dtype=np.int32)
+                            next_person_id = len(pts) + 1
+                        else:
+                            boxes, pts, person_ids = find_person_id_associations(
+                                boxes=boxes, pts=pts, prev_boxes=prev_boxes, prev_pts=prev_pts, prev_person_ids=prev_person_ids,
+                                next_person_id=next_person_id, pose_alpha=0.2, similarity_threshold=0.4, smoothing_alpha=0.1,
+                            )
+                            next_person_id = max(next_person_id, np.max(person_ids) + 1)
+                    else:
+                        person_ids = np.array((), dtype=np.int32)
+
+                    prev_boxes = boxes.copy()
+                    prev_pts = pts.copy()
+                    prev_person_ids = person_ids
+
                 else:
-                    boxes, pts, person_ids = find_person_id_associations(
-                        boxes=boxes, pts=pts, prev_boxes=prev_boxes, prev_pts=prev_pts, prev_person_ids=prev_person_ids,
-                        next_person_id=next_person_id, pose_alpha=0.2, similarity_threshold=0.4, smoothing_alpha=0.1,
-                    )
-                    next_person_id = max(next_person_id, np.max(person_ids) + 1)
-            else:
-                person_ids = np.array((), dtype=np.int32)
+                    person_ids = np.arange(len(pts), dtype=np.int32)
 
-            prev_boxes = boxes.copy()
-            prev_pts = pts.copy()
-            prev_person_ids = person_ids
-
-        else:
-            person_ids = np.arange(len(pts), dtype=np.int32)
-
-        for i, (pt, pid) in enumerate(zip(pts, person_ids)):
-            frame = draw_points_and_skeleton(frame, pt, joints_dict()[hrnet_joints_set]['skeleton'], person_index=pid,
-                                             points_color_palette='gist_rainbow', skeleton_color_palette='jet',
-                                             points_palette_samples=10)
+                for i, (pt, _) in enumerate(zip(pts, person_ids)):
+                    frame = draw_points_and_skeleton(frame, pt, joints_dict()[hrnet_joints_set]['skeleton'], person_index=pid,
+                                                     points_color_palette='gist_rainbow', skeleton_color_palette='jet',
+                                                     points_palette_samples=10, offset=(x1, y1))
 
         fps = 1. / (time.time() - t)
         print('\rframerate: %f fps' % fps, end='')
@@ -138,6 +155,8 @@ def main(camera_id, filename, hrnet_m, hrnet_c, hrnet_j, hrnet_weights, hrnet_jo
                 fourcc = cv2.VideoWriter_fourcc(*video_format)  # video format
                 video_writer = cv2.VideoWriter('output.avi', fourcc, video_framerate, (frame.shape[1], frame.shape[0]))
             video_writer.write(frame)
+
+        frame_no += 1
 
     if save_video:
         video_writer.release()
@@ -162,6 +181,8 @@ if __name__ == '__main__':
                         help="disable the multiperson detection (YOLOv3 or an equivalen detector is required for"
                              "multiperson detection)",
                         action="store_true")
+    parser.add_argument("--detections_path", help="use detections from yolov4+deepsort",
+                        type=str, default=None)
     parser.add_argument("--use_tiny_yolo",
                         help="Use YOLOv3-tiny in place of YOLOv3 (faster person detection). Ignored if --single_person",
                         action="store_true")

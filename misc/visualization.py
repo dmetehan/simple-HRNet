@@ -1,3 +1,5 @@
+import os
+
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -68,7 +70,7 @@ def joints_dict():
     return joints
 
 
-def draw_points(image, points, color_palette='tab20', palette_samples=16, confidence_threshold=0.5):
+def draw_points(image, points, color_palette='tab20', palette_samples=16, confidence_threshold=0.5, offset=None):
     """
     Draws `points` on `image`.
 
@@ -102,13 +104,13 @@ def draw_points(image, points, color_palette='tab20', palette_samples=16, confid
 
     for i, pt in enumerate(points):
         if pt[2] > confidence_threshold:
-            image = cv2.circle(image, (int(pt[1]), int(pt[0])), circle_size, tuple(colors[i % len(colors)]), -1)
+            image = cv2.circle(image, (int(pt[1]) + offset[0], int(pt[0]) + offset[1]), circle_size, tuple(colors[i % len(colors)]), -1)
 
     return image
 
 
 def draw_skeleton(image, points, skeleton, color_palette='Set2', palette_samples=8, person_index=0,
-                  confidence_threshold=0.5):
+                  confidence_threshold=0.5, offset=None):
     """
     Draws a `skeleton` on `image`.
 
@@ -146,7 +148,7 @@ def draw_skeleton(image, points, skeleton, color_palette='Set2', palette_samples
         pt1, pt2 = points[joint]
         if pt1[2] > confidence_threshold and pt2[2] > confidence_threshold:
             image = cv2.line(
-                image, (int(pt1[1]), int(pt1[0])), (int(pt2[1]), int(pt2[0])),
+                image, (int(pt1[1]) + offset[0], int(pt1[0]) + offset[1]), (int(pt2[1]) + offset[0], int(pt2[0]) + offset[1]),
                 tuple(colors[person_index % len(colors)]), 2
             )
 
@@ -155,7 +157,7 @@ def draw_skeleton(image, points, skeleton, color_palette='Set2', palette_samples
 
 def draw_points_and_skeleton(image, points, skeleton, points_color_palette='tab20', points_palette_samples=16,
                              skeleton_color_palette='Set2', skeleton_palette_samples=8, person_index=0,
-                             confidence_threshold=0.5):
+                             confidence_threshold=0.5, offset=None):
     """
     Draws `points` and `skeleton` on `image`.
 
@@ -186,9 +188,9 @@ def draw_points_and_skeleton(image, points, skeleton, points_color_palette='tab2
     """
     image = draw_skeleton(image, points, skeleton, color_palette=skeleton_color_palette,
                           palette_samples=skeleton_palette_samples, person_index=person_index,
-                          confidence_threshold=confidence_threshold)
+                          confidence_threshold=confidence_threshold, offset=offset)
     image = draw_points(image, points, color_palette=points_color_palette, palette_samples=points_palette_samples,
-                        confidence_threshold=confidence_threshold)
+                        confidence_threshold=confidence_threshold, offset=offset)
     return image
 
 
@@ -273,6 +275,7 @@ def check_video_rotation(filename):
     # https://stackoverflow.com/questions/53097092/frame-from-video-is-upside-down-after-extracting/55747773#55747773
 
     # this returns meta-data of the video file in form of a dictionary
+    print(os.path.exists(filename))
     meta_dict = ffmpeg.probe(filename)
 
     # from the dictionary, meta_dict['streams'][0]['tags']['rotate'] is the key
