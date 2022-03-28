@@ -28,7 +28,7 @@ def main(format, filename, hrnet_m, hrnet_c, hrnet_j, hrnet_weights, image_resol
 
     image_resolution = ast.literal_eval(image_resolution)
 
-    rotation_code = check_video_rotation(filename)
+    rotation_code = None  # check_video_rotation(filename)
     video = cv2.VideoCapture(filename)
     assert video.isOpened()
     nof_frames = video.get(cv2.CAP_PROP_FRAME_COUNT)
